@@ -518,6 +518,65 @@ func TestIssue70179(t *testing.T) {
 	}
 }
 
+func TestParseDuplicateAttributes(t *testing.T) {
+	// Browsers keep only the first of several attributes sharing an
+	// (ASCII case-insensitive) name. The parsed tree, and its rendering, must
+	// agree, otherwise a sanitizer that inspects the tree can be bypassed.
+	for _, tc := range []struct {
+		name     string
+		input    string
+		fragment bool
+		want     string
+	}{
+		{
+			"document",
+			`<a href="javascript:alert(1)" HREF="https://example.com/">x</a>`,
+			false,
+			`<html><head></head><body><a href="javascript:alert(1)">x</a></body></html>`,
+		},
+		{
+			"foreign content",
+			`<svg><a xlink:href="javascript:alert(1)" XLINK:HREF="#x"></a></svg>`,
+			false,
+			`<html><head></head><body><svg><a xlink:href="javascript:alert(1)"></a></svg></body></html>`,
+		},
+		{
+			"fragment",
+			`<img src="x" onerror="alert(1)" OnError="">`,
+			true,
+			`<img src="x" onerror="alert(1)"/>`,
+		},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			var nodes []*Node
+			if tc.fragment {
+				context := &Node{Type: ElementNode, Data: "body", DataAtom: atom.Body}
+				var err error
+				if nodes, err = ParseFragment(strings.NewReader(tc.input), context); err != nil {
+					t.Fatalf("ParseFragment: %v", err)
+				}
+			} else {
+				doc, err := Parse(strings.NewReader(tc.input))
+				if err != nil {
+					t.Fatalf("Parse: %v", err)
+				}
+				for c := doc.FirstChild; c != nil; c = c.NextSibling {
+					nodes = append(nodes, c)
+				}
+			}
+			var b bytes.Buffer
+			for _, n := range nodes {
+				if err := Render(&b, n); err != nil {
+					t.Fatalf("Render: %v", err)
+				}
+			}
+			if got := b.String(); got != tc.want {
+				t.Errorf("got %q, want %q", got, tc.want)
+			}
+		})
+	}
+}
+
 func TestDepthLimit(t *testing.T) {
 	for _, tc := range []struct {
 		name    string
